@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meu Universo Sandbox Plano</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #e0e0e0;
+            font-family: sans-serif;
+            user-select: none;
+        }
+
+        /* O "Mundo" que se move */
+        #mundo {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            transform-origin: 0 0;
+        }
+
+        /* Menu de instruções com transição suave para esconder */
+        #instrucoes {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            z-index: 999999;
+            max-width: 300px;
+            transition: transform 0.3s ease; /* Efeito deslizar */
+        }
+
+        /* Classe que será aplicada para esconder o menu */
+        #instrucoes.escondido {
+            transform: translateX(-330px); /* Joga o menu para fora da tela */
+        }
+
+        /* Botão de alternar (Fixado na borda do menu) */
+        .btn-alternar-menu {
+            position: absolute;
+            top: 10px;
+            right: -40px; /* Joga o botão para fora da caixinha principal */
+            width: 35px;
+            height: 35px;
+            background: #4A90E2;
+            color: white;
+            border: none;
+            border-radius: 0 6px 6px 0;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 3px 0 5px rgba(0,0,0,0.1);
+        }
+        .btn-alternar-menu:hover { background: #357ABD; }
+
+        .botoes-container {
+            margin-top: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        button {
+            background: #4A90E2;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        button:hover { background: #357ABD; }
+
+        #input-arquivo {
+            display: none;
+        }
+
+        /* Elementos colocados no jogo */
+        .elemento-jogo {
+            position: absolute;
+            cursor: move;
+            width: 250px;
+            transition: transform 0.05s ease, border 0.1s;
+            box-sizing: border-box;
+        }
+
+        .elemento-jogo:focus {
+            outline: none;
+            border: 3px solid #4A90E2;
+            box-shadow: 0 0 10px rgba(74, 144, 226, 0.5);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="instrucoes">
+        <button class="btn-alternar-menu" onclick="alternarMenu()" title="Esconder/Mostrar Menu">◀</button>
+
+        <h3>Menu Sandbox</h3>
+        <div id="conteudo-menu">
+            <p>📋 <strong>Ctrl + V</strong> ou <strong>Arraste arquivos</strong> do PC para a tela.</p>
+            <p>🖱️ <strong>Botão Esquerdo:</strong> Move os objetos.</p>
+            <p>🎥 <strong>Botão Direito (qualquer lugar):</strong> Arraste para mover a câmera.</p>
+            <p>🎬 <strong>Ctrl + Botão Direito no vídeo:</strong> Abre o menu de controles dele.</p>
+            <p>🎡 <strong>Rodinha do Mouse:</strong> Altera o tamanho.</p>
+            <p>❌ <strong>Clique + Delete/Backspace:</strong> Apaga o objeto.</p>
+
+            <div class="botoes-container">
+                <button onclick="salvarMundoParaArquivo()">💾 Baixar Arquivo de Salvamento</button>
+                <button onclick="document.getElementById('input-arquivo').click()">📂 Carregar Arquivo do PC</button>
+                <input type="file" id="input-arquivo" accept=".json" onchange="carregarMundoDeArquivo(event)">
+            </div>
+        </div>
+    </div>
+
+    <div id="mundo"></div>
+
+    <script>
+        const mundo = document.getElementById('mundo');
+        const menuInstrucoes = document.getElementById('instrucoes');
+
+        let elementoArrastando = null;
+        let offsetX = 0, offsetY = 0;
+        let maiorZIndex = 1;
+
+        // Variáveis da Câmera (Pan)
+        let arrastandoCamera = false;
+        let cameraX = 0, cameraY = 0;
+        let cameraStartX = 0, cameraStartY = 0;
+
+        // --- FUNÇÃO PARA ESCONDER / MOSTRAR O MENU ---
+        function alternarMenu() {
+            const botao = document.querySelector('.btn-alternar-menu');
+            menuInstrucoes.classList.toggle('escondido');
+
+            // Muda a setinha do botão dependendo do estado
+            if (menuInstrucoes.classList.contains('escondido')) {
+                botao.innerText = '▶';
+            } else {
+                botao.innerText = '◀';
+            }
+        }
+
+        // --- 1. ENTRADA DE ARQUIVOS ---
+        window.addEventListener('paste', (e) => {
+            tratarArquivos(e.clipboardData.items, window.innerWidth/2 - cameraX, window.innerHeight/2 - cameraY);
+        });
+
+        window.addEventListener('dragover', (e) => e.preventDefault());
+        window.addEventListener('drop', (e) => {
+            e.preventDefault();
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                const xReal = e.clientX - cameraX;
+                const yReal = e.clientY - cameraY;
+                tratarArquivos(e.dataTransfer.items, xReal, yReal);
+            }
+        });
+
+        function tratarArquivos(itens, x, y) {
+            for (let i = 0; i < itens.length; i++) {
+                const arquivoBlob = itens[i].getAsFile();
+                if (!arquivoBlob) continue;
+
+                const leitor = new FileReader();
+                const tipo = itens[i].type.indexOf('image') !== -1 ? 'img' : (itens[i].type.indexOf('video') !== -1 ? 'video' : null);
+
+                if (tipo) {
+                    leitor.onload = function(event) {
+                        criarElemento(tipo, event.target.result, x, y);
+                    };
+                    leitor.readAsDataURL(arquivoBlob);
+                }
+            }
+        }
+
+        // --- 2. CRIAÇÃO DE ELEMENTOS ---
+        function criarElemento(tipo, src, x = 150, y = 150, escala = 1, zIndex = null) {
+            const el = document.createElement(tipo);
+            el.src = src;
+            el.className = 'elemento-jogo';
+            el.tabIndex = 0;
+
+            el.style.left = `${x}px`;
+            el.style.top = `${y}px`;
+
+            if (tipo === 'video') {
+                el.autoplay = true; el.loop = true; el.muted = true; el.playsInline = true;
+
+                el.addEventListener('contextmenu', (e) => {
+                    if (e.ctrlKey) {
+                        e.stopPropagation();
+                    } else {
+                        e.preventDefault();
+                    }
+                });
+            }
+
+            if (zIndex) {
+                el.style.zIndex = zIndex;
+                if (zIndex > maiorZIndex) maiorZIndex = zIndex;
+            } else {
+                el.style.zIndex = maiorZIndex++;
+            }
+
+            el.dataset.escala = escala;
+            el.style.transform = `scale(${escala})`;
+
+            el.addEventListener('mousedown', iniciarArrastoObjeto);
+            el.addEventListener('wheel', ajustarTamanho);
+            el.addEventListener('keydown', deletarElemento);
+            el.addEventListener('dragstart', (e) => e.preventDefault());
+
+            mundo.appendChild(el);
+            return el;
+        }
+
+        // --- 3. LÓGICA DE TAMANHO E DELETAR ---
+        function ajustarTamanho(e) {
+            e.preventDefault();
+            let escalaAtual = parseFloat(e.target.dataset.escala);
+            escalaAtual += (e.deltaY < 0) ? 0.1 : -0.1;
+            escalaAtual = Math.max(0.15, Math.min(4, escalaAtual));
+
+            e.target.dataset.escala = escalaAtual;
+            e.target.style.transform = `scale(${escalaAtual})`;
+        }
+
+        document.addEventListener('keydown', deletarElemento);
+        function deletarElemento(e) {
+            if ((e.key === 'Delete' || e.key === 'Backspace') && document.activeElement.classList.contains('elemento-jogo')) {
+                document.activeElement.remove();
+            }
+        }
+
+        // --- 4. MOVIMENTAR OBJETOS ---
+        function iniciarArrastoObjeto(e) {
+            if (e.button !== 0) return;
+            e.stopPropagation();
+
+            elementoArrastando = e.target;
+            elementoArrastando.focus();
+
+            maiorZIndex++;
+            elementoArrastando.style.zIndex = maiorZIndex;
+
+            offsetX = e.clientX - elementoArrastando.offsetLeft;
+            offsetY = e.clientY - elementoArrastando.offsetTop;
+
+            window.addEventListener('mousemove', arrastarObjeto);
+            window.addEventListener('mouseup', pararArrastoObjeto);
+        }
+
+        function arrastarObjeto(e) {
+            if (elementoArrastando) {
+                elementoArrastando.style.left = (e.clientX - offsetX) + 'px';
+                elementoArrastando.style.top = (e.clientY - offsetY) + 'px';
+            }
+        }
+
+        function pararArrastoObjeto() {
+            elementoArrastando = null;
+            window.removeEventListener('mousemove', arrastarObjeto);
+            window.removeEventListener('mouseup', pararArrastoObjeto);
+        }
+
+        // --- 5. MOVIMENTAR CÂMERA ---
+        window.addEventListener('contextmenu', e => e.preventDefault());
+
+        window.addEventListener('mousedown', (e) => {
+            if (e.button === 2 && !e.ctrlKey) {
+                arrastandoCamera = true;
+                cameraStartX = e.clientX - cameraX;
+                cameraStartY = e.clientY - cameraY;
+            }
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!arrastandoCamera) return;
+            cameraX = e.clientX - cameraStartX;
+            cameraY = e.clientY - cameraStartY;
+            mundo.style.left = cameraX + 'px';
+            mundo.style.top = cameraY + 'px';
+        });
+
+        window.addEventListener('mouseup', (e) => {
+            if (e.button === 2) arrastandoCamera = false;
+        });
+
+        // --- 6. SISTEMA DE SALVAR E CARREGAR ---
+        function salvarMundoParaArquivo() {
+            const elementos = document.querySelectorAll('.elemento-jogo');
+            const dadosParaSalvar = [];
+
+            elementos.forEach(el => {
+                dadosParaSalvar.push({
+                    tipo: el.tagName.toLowerCase(),
+                    src: el.src,
+                    x: parseInt(el.style.left),
+                    y: parseInt(el.style.top),
+                    escala: el.dataset.escala,
+                    zIndex: el.style.zIndex
+                });
+            });
+
+            const estruturaCompleta = {
+                cameraX, cameraY, maiorZIndex, elementos: dadosParaSalvar
+            };
+
+            const textoDados = JSON.stringify(estruturaCompleta);
+            const blob = new Blob([textoDados], { type: 'application/json' });
+            const urlDownload = URL.createObjectURL(blob);
+
+            const linkInvisivel = document.createElement('a');
+            linkInvisivel.href = urlDownload;
+            linkInvisivel.download = 'meu_mundo_sandbox.json';
+            document.body.appendChild(linkInvisivel);
+            linkInvisivel.click();
+            document.body.removeChild(linkInvisivel);
+        }
+
+        function carregarMundoDeArquivo(event) {
+            const arquivo = event.target.files[0];
+            if (!arquivo) return;
+
+            const leitor = new FileReader();
+            leitor.onload = function(e) {
+                const dados = JSON.parse(e.target.result);
+                mundo.innerHTML = '';
+
+                cameraX = dados.cameraX || 0;
+                cameraY = dados.cameraY || 0;
+                maiorZIndex = dados.maiorZIndex || 1;
+
+                mundo.style.left = cameraX + 'px';
+                mundo.style.top = cameraY + 'px';
+
+                dados.elementos.forEach(d => {
+                    criarElemento(d.tipo, d.src, d.x, d.y, d.escala, d.zIndex);
+                });
+            };
+            leitor.readAsText(arquivo);
+            event.target.value = '';
+        }
+    </script>
+</body>
+</html>
